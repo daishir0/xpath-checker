@@ -1,8 +1,14 @@
 conf/urls.txt
 conf/mailaddr.txt
-log/
-data/
 node_modules/
 old/
 files.txt
 .env
+
+# Ignore all files in log/ and data/ directories
+log/*
+data/*
+
+# But do not ignore .gitkeep files
+!log/.gitkeep
+!data/.gitkeep
