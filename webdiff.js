@@ -6,7 +6,8 @@ const nodemailer = require('nodemailer');
 const { JSDOM } = require('jsdom');
 const dotenv = require('dotenv');
 
-dotenv.config(); // Load environment variables from .env file
+// .envファイルの絶対パスを指定
+dotenv.config({ path: path.join(__dirname, '.env') });
 
 const dataDir = '/var/www/html/node/data';
 const urlsFile = path.join(__dirname, 'conf/urls.txt');
