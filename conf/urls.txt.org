@@ -1,0 +1,1 @@
+テストサイト,https://www.test.jp/path/test.html,//*[@id="contentsColumnWrapR"]/div[1]

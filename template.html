@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+  <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+  <title>URLリスト編集画面</title>
+</head>
+<body>
+  <div class="container mt-5">
+    <h1 class="mb-4">URLリスト編集画面</h1>
+    <p>カンマ区切りで、サイト名、確認対象URL、確認対象箇所のXPATHを入力してください。</p>
+    <p>例：サイト名,URL,XPATH</p>
+    <form action="/" method="post">
+      <div class="form-group">
+        <textarea name="urls" class="form-control" rows="10" style="height: 300px;">{{urls}}</textarea>
+      </div>
+      <div class="form-group">
+        <textarea name="mailAddrs" class="form-control" rows="5" style="height: 150px;">{{mailAddrs}}</textarea>
+      </div>
+      <button type="submit" class="btn btn-primary">検査・更新ボタン</button>
+    </form>
+    <h2 class="mt-5">検査結果</h2>
+    <pre id="result" class="bg-light p-3 border">{{errors}}</pre>
+  </div>
+  <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.4/dist/umd/popper.min.js"></script>
+  <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+</body>
+</html>

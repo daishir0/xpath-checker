@@ -1,0 +1,8 @@
+conf/urls.txt
+conf/mailaddr.txt
+log/
+data/
+node_modules/
+old/
+files.txt
+.env
