@@ -9,8 +9,6 @@ require('dotenv').config(); // 環境変数を読み込む
 
 const app = express();
 const PORT = 4000;
-const urlsFile = path.join(__dirname, 'conf/urls.txt');
-const mailAddrFile = path.join(__dirname, 'conf/mailaddr.txt');
 
 app.use(bodyParser.urlencoded({ extended: true }));
 
@@ -24,15 +22,37 @@ app.use(basicAuth({
 const template = fs.readFileSync(path.join(__dirname, 'template.html'), 'utf-8');
 
 // URLリスト編集画面の表示
-app.get('/', (req, res) => {
+app.get('/:suffix?', (req, res) => {
+  const suffix = req.params.suffix || '';
+  const urlsFile = path.join(__dirname, `conf/urls${suffix}.txt`);
+  const mailAddrFile = path.join(__dirname, `conf/mailaddr${suffix}.txt`);
+
+  if (!fs.existsSync(urlsFile) || !fs.existsSync(mailAddrFile)) {
+    res.status(404).send('指定されたファイルが存在しません');
+    return;
+  }
+
   const urls = fs.readFileSync(urlsFile, 'utf-8');
   const mailAddrs = fs.readFileSync(mailAddrFile, 'utf-8');
-  const html = template.replace('{{urls}}', urls).replace('{{mailAddrs}}', mailAddrs).replace('{{errors}}', '');
+  const actionUrl = `/${suffix}`;
+  const html = template.replace('{{urls}}', urls)
+                       .replace('{{mailAddrs}}', mailAddrs)
+                       .replace('{{errors}}', '')
+                       .replace('{{actionUrl}}', actionUrl);
   res.send(html);
 });
 
 // URLリストとメールアドレスリストの更新と検査
-app.post('/', async (req, res) => {
+app.post('/:suffix?', async (req, res) => {
+  const suffix = req.params.suffix || '';
+  const urlsFile = path.join(__dirname, `conf/urls${suffix}.txt`);
+  const mailAddrFile = path.join(__dirname, `conf/mailaddr${suffix}.txt`);
+
+  if (!fs.existsSync(urlsFile) || !fs.existsSync(mailAddrFile)) {
+    res.status(404).send('指定されたファイルが存在しません');
+    return;
+  }
+
   const urls = req.body.urls;
   const mailAddrs = req.body.mailAddrs;
   fs.writeFileSync(urlsFile, urls);
@@ -60,7 +80,11 @@ app.post('/', async (req, res) => {
     }
   }
 
-  const html = template.replace('{{urls}}', urls).replace('{{mailAddrs}}', mailAddrs).replace('{{errors}}', errors.join('\n'));
+  const actionUrl = `/${suffix}`;
+  const html = template.replace('{{urls}}', urls)
+                       .replace('{{mailAddrs}}', mailAddrs)
+                       .replace('{{errors}}', errors.join('\n'))
+                       .replace('{{actionUrl}}', actionUrl);
   res.send(html);
 });
 

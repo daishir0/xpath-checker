@@ -10,10 +10,8 @@ const dotenv = require('dotenv');
 dotenv.config({ path: path.join(__dirname, '.env') });
 
 const dataDir = '/var/www/html/node/data';
-const urlsFile = path.join(__dirname, 'conf/urls.txt');
 const mailLogFile = path.join(__dirname, 'log/mail.log');
 const webDiffLogFile = path.join(__dirname, 'log/webdiff.log');
-const mailAddrFile = path.join(__dirname, 'conf/mailaddr.txt');
 const mailsend = 1; // 1: メール送信, 0: ログに保存
 
 // 環境変数から認証情報を取得
@@ -50,10 +48,47 @@ const sanitizeFileName = (url) => {
   return url.replace(/[^\w.-]/g, '_');
 };
 
-// HTMLからテキストを抽出
+// HTMLからテキストを抽出（JavaScriptを除外）
 const extractTextFromHtml = (html) => {
+  // スクリプトタグとその内容を完全に除去
+  html = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+
   const dom = new JSDOM(html);
-  return dom.window.document.body.textContent || "";
+  const document = dom.window.document;
+
+  // その他の不要な要素を削除
+  const elementsToRemove = document.querySelectorAll('style, noscript, iframe');
+  elementsToRemove.forEach(el => el.remove());
+
+  // インラインJavaScriptイベントハンドラを除去
+  const allElements = document.getElementsByTagName('*');
+  for (let el of allElements) {
+    for (let attr of el.attributes) {
+      if (attr.name.startsWith('on')) {
+        el.removeAttribute(attr.name);
+      }
+    }
+  }
+
+  // テキストノードのみを抽出し、適切に整形する
+  const extractTextNodes = (node) => {
+    let result = '';
+    if (node.nodeType === 3) { // テキストノード
+      result = node.textContent;
+    } else if (node.nodeType === 1) { // 要素ノード
+      for (let child of node.childNodes) {
+        result += extractTextNodes(child);
+      }
+      if (['p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'br'].includes(node.tagName.toLowerCase())) {
+        result += '\n';
+      }
+    }
+    return result;
+  };
+
+  return extractTextNodes(document.body)
+    .replace(/\n{3,}/g, '\n\n') // 3つ以上の連続した改行を2つに減らす
+    .trim();
 };
 
 // HTMLを取得してファイルに保存
@@ -64,7 +99,7 @@ const fetchAndSaveHtml = async (url, fileName, xpath) => {
   }
 
   try {
-    const response = await axios.get(url, { timeout: 10000 }); // タイムアウトを10秒に設定
+    const response = await axios.get(url, { timeout: 10000 });
     let html = response.data;
 
     if (xpath) {
@@ -78,15 +113,12 @@ const fetchAndSaveHtml = async (url, fileName, xpath) => {
       }
     }
 
+    // 元のHTMLをそのまま保存
     fs.writeFileSync(fileName, html);
     console.log(`HTMLを${fileName}に保存しました。`);
   } catch (error) {
-    if (error.code === 'ECONNABORTED') {
-      console.error(`リクエストがタイムアウトしました: ${error.message}`);
-    } else {
-      console.error(`HTMLの取得に失敗しました: ${error.message}`);
-    }
-    throw { url, message: error.message }; // URLとエラーメッセージを含むオブジェクトをスロー
+    console.error(`HTMLの取得に失敗しました: ${error.message}`);
+    throw { url, message: error.message };
   }
 };
 
@@ -108,17 +140,20 @@ const compareAndDisplayDiff = (file1, file2) => {
     let diffText = '';
     differences.forEach((part) => {
       if (part.added || part.removed) {
-        const lines = part.value.split('\n').filter(line => line.trim() !== '');
+        const lines = part.value.split('\n');
         lines.forEach(line => {
-          if (part.added) {
-            diffText += '+' + line.trimStart() + '\n';
+          if (part.added && line.trim() !== '') {
+            diffText += '+' + line + '\n';
           } else if (part.removed) {
-            //diffText += '-' + line + '\n';
+            // diffText += '-' + line + '\n';
           }
         });
+      } else {
+        // 変更がない部分も保持する場合
+        // diffText += part.value;
       }
     });
-    return diffText;
+    return diffText.trim(); // 最後の余分な改行を削除
   }
 };
 
@@ -152,7 +187,8 @@ const sendEmail = async (to, subject, text) => {
     from: EMAIL_FROM,
     to: to,
     subject: subject,
-    text: text
+    text: text,
+    html: text.replace(/\n/g, '<br>')
   };
 
   try {
@@ -164,69 +200,106 @@ const sendEmail = async (to, subject, text) => {
   }
 };
 
+// ファイルの接尾辞を検出
+const detectFileSuffixes = (dir, baseName) => {
+  const files = fs.readdirSync(dir);
+  console.log(`検出されたファイル: ${files.join(', ')}`);
+  const suffixes = files
+    .filter(file => file.startsWith(baseName) && !file.endsWith('.org'))
+    .map(file => {
+      if (file === `${baseName}.txt`) {
+        return '';
+      }
+      return file.replace(baseName, '').replace('.txt', '');
+    });
+  console.log(`検出された接尾辞: ${suffixes.join(', ')}`);
+  return suffixes;
+};
+
 // メイン処理
 const main = async () => {
   const today = new Date();
   const formattedToday = getFormattedDate(today);
   const formattedDateForSubject = getFormattedDateForSubject(today);
 
-  // URLリストを読み込み
-  const urls = fs.readFileSync(urlsFile, 'utf-8').split('\n').filter(line => line.trim() !== '');
+  console.log('メイン処理を開始します。');
 
-  let updateText = '更新あり\n';
-  let noUpdateText = '更新なし\n';
-  let hasUpdates = false;
-  const errors = [];
+  // confディレクトリ内のurlsファイルの接尾辞を検出
+  const urlSuffixes = detectFileSuffixes(path.join(__dirname, 'conf'), 'urls');
+  console.log(`処理する接尾辞: ${urlSuffixes.join(', ')}`);
 
-  for (const line of urls) {
-    const [siteName, url, xpath] = line.split(',');
+  for (const suffix of urlSuffixes) {
+    const urlsFile = path.join(__dirname, `conf/urls${suffix}.txt`);
+    const mailAddrFile = path.join(__dirname, `conf/mailaddr${suffix}.txt`);
 
-    if (!siteName || !url) continue;
+    console.log(`処理中のファイル: ${urlsFile}`);
 
-    const todayFileName = `${formattedToday}_${sanitizeFileName(url + xpath)}.txt`;
-    const todayFilePath = path.join(dataDir, todayFileName);
+    if (!fs.existsSync(urlsFile)) {
+      console.log(`ファイルが存在しません: ${urlsFile}`);
+      continue;
+    }
 
-    try {
-      // 今日のHTMLを取得して保存
-      await fetchAndSaveHtml(url, todayFilePath, xpath);
+    // URLリストを読み込み
+    const urls = fs.readFileSync(urlsFile, 'utf-8').split('\n').filter(line => line.trim() !== '');
+    console.log(`読み込まれたURL数: ${urls.length}`);
 
-      // 最新のファイルとその1つ前のファイルを探して比較
-      const files = findLatestFiles(url + xpath);
-      if (files.length === 2) {
-        const [latestFile, prevFile] = files;
-        const diffText = compareAndDisplayDiff(latestFile, prevFile);
+    let updateText = '# 更新あり\n';
+    let noUpdateText = '# 更新なし\n';
+    let hasUpdates = false;
+    const errors = [];
 
-        if (diffText !== '') {
-          hasUpdates = true;
-          updateText += `${siteName}\n${url}\n\n${diffText}\n`;
+    for (const line of urls) {
+      const [siteName, url, xpath] = line.split(',');
+      console.log(`処理中のサイト: ${siteName}, URL: ${url}`);
+
+      try {
+        // 今日のHTMLを取得して保存
+        const fullPath = path.join(dataDir, `${formattedToday}_${sanitizeFileName(url + xpath)}.txt`);
+        await fetchAndSaveHtml(url, fullPath, xpath);
+
+        // 最新のファイルとその1つ前のファイルを探して比較
+        const files = findLatestFiles(url + xpath);
+        if (files.length === 2) {
+          const [latestFile, prevFile] = files;
+          const diffText = compareAndDisplayDiff(latestFile, prevFile);
+          if (diffText !== '') {
+            hasUpdates = true;
+            const cleanedDiffText = diffText
+              .split('\n')
+              .filter(line => line.trim() !== '')
+              .join('\n');
+            updateText += `\n## ${siteName}\n${url}\n\n${cleanedDiffText}\n`;
+          } else {
+            noUpdateText += `${siteName}\n`;
+          }
         } else {
           noUpdateText += `${siteName}\n`;
         }
-      } else {
-        noUpdateText += `${siteName}\n`;
+      } catch (error) {
+        errors.push(`Error fetching ${url}: ${error.message}`);
       }
-    } catch (error) {
-      errors.push(`Error fetching ${url}: ${error.message}`);
     }
+
+    // 差分があるかどうかに関係なくメールを送信
+    const to = fs.readFileSync(mailAddrFile, 'utf-8').split('\n').filter(line => line.trim() !== '');
+    const subjectPrefix = hasUpdates ? '更新あり：' : '更新なし：';
+    const subject = `${subjectPrefix}差分報告（${formattedDateForSubject}）`;
+    const text = updateText + '\n' + noUpdateText + '\n# Errors:\n' + errors.join('\n'); // エラーを本文に追加
+
+    if (mailsend === 1) {
+      for (const email of to) {
+        await sendEmail(email, subject, text);
+      }
+    } else {
+      fs.writeFileSync(mailLogFile, `To: ${to.join(', ')}\nSubject: ${subject}\n\n${text}`);
+      console.log(`メール内容を${mailLogFile}に保存しました`);
+    }
+
+    console.log('Errors:', errors); // デバッグプリント
+    console.log(`${urlsFile}の処理が完了しました。`);
   }
 
-  // 差分があるかどうかに関係なくメールを送信
-  const to = fs.readFileSync(mailAddrFile, 'utf-8').split('\n').filter(line => line.trim() !== ''); // 修正
-  const subjectPrefix = hasUpdates ? '更新あり：' : '更新なし：';
-  const subject = `${subjectPrefix}差分報告（${formattedDateForSubject}）`;
-  const text = updateText + '\n' + noUpdateText + '\nErrors:\n' + errors.join('\n'); // エラーを本文に追加
-
-  if (mailsend === 1) {
-    for (const email of to) {
-      await sendEmail(email, subject, text);
-    }
-  } else {
-    fs.writeFileSync(mailLogFile, `To: ${to.join(', ')}\nSubject: ${subject}\n\n${text}`);
-    console.log(`メール内容を${mailLogFile}に保存しました`);
-  }
-
-  console.log('Errors:', errors); // デバッグプリント
-  return errors; // エラーを返す
+  console.log('すべての処理が完了しました。');
 };
 
 // `main`関数をエクスポート
@@ -238,7 +311,7 @@ module.exports = {
   compareAndDisplayDiff,
   findLatestFiles,
   sendEmail,
-  main, // 追加
+  main,
 };
 
 // `webdiff.js`を直接実行した場合のみ`main`関数を呼び出す

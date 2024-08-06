@@ -1,5 +1,5 @@
-conf/urls.txt
-conf/mailaddr.txt
+conf/urls*.txt
+conf/mailaddr*.txt
 node_modules/
 old/
 files.txt
@@ -12,3 +12,5 @@ data/*
 # But do not ignore .gitkeep files
 !log/.gitkeep
 !data/.gitkeep
+!conf/urls.txt.org
+!conf/mailaddr.txt.org
